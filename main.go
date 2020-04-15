@@ -1,199 +1,112 @@
 package main
 
 import (
-	"bufio"
-	"time"
-	"os"
-	"log"
-	"fmt"
-	"net"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
-	"errors"
+	"fmt"
+	"net"
+	"time"
+	"log"
+	"os"
 )
-
-const (
-	ProtocolICMP = 1
-	ProtocolIPv6ICMP = 58
-)
-
-// Default to listen on all IPv4 interfaces
-var ListenAddr = "0.0.0.0"
-
-
-type Address struct{
-	name string
-}
 
 func main() {
-	scanner := bufio.NewScanner(os.Stdin)
 
-	fmt.Print("Please enter an ip or an address: ")
-
-	scanner.Scan()
-
-	text := scanner.Text()
-
-	addr := Address{text}
-
+	payloadV4, _ := createICMP(ipv4.ICMPTypeEcho)
+	addr := "google.com"
+	ttl := 52
 	for {
-
-		ploss, dur, err := addr.Ping("ipv4")
-
+		ploss, dur, err := PingIpv6(addr, ttl, payloadV4)
 		if err != nil {
-			log.Printf("host: %s, Loss: %g, error: %s\n", addr.name, ploss, err)
+			log.Printf("host: %s, Loss: %d, error: %s\n", addr, ploss, err)
 			return
 		}
-		log.Printf("host: %s, Loss: %g, RTT: %s\n", addr.name, ploss, dur)
-
+		log.Printf("host: %s, Loss: %d, RTT: %s\n", addr, ploss, dur)
 		time.Sleep(1 * time.Second)
 	}
 }
 
-func (addr Address) Ping(ipv string) (float32, time.Duration, error) {
-	switch ipv{
-		case "ipv4":
-			return PingIp4(addr)
-		case "ipv6":
-			return PingIp6(addr)
-		default:
-			return 0, 0, errors.New("No ip version specified")
+
+func PingIpv4(address string, ttl int, payload []byte)(int, time.Duration, error){
+	netaddr, err := net.ResolveIPAddr("ip4", address)
+
+	conn, err := net.Dial("ip4:icmp", netaddr.String())
+
+	if ttl == 0 {
+		ttl = 60
 	}
+
+	if err != nil {
+		return 0, 0, err
+	}
+	defer conn.Close()
+
+	opts := ipv4.NewConn(conn)
+
+	if err := opts.SetTTL(ttl); err != nil {
+		return 0, 0, fmt.Errorf("set TTL %d: %s", ttl, err)
+	}
+
+	return ping(conn, payload)
 }
 
-func PingIp4(addr Address)(float32, time.Duration, error){
-	// Start listening for icmp replies
-	c, err := icmp.ListenPacket("ip4:icmp", ListenAddr)
-	if err != nil {
-			return 0, 0, err
-	}
-	
-	defer c.Close()
+func PingIpv6(address string, ttl int, payload []byte) (int, time.Duration, error){
+	netaddr, err := net.ResolveIPAddr("ip", address)
 
-	// Resolve any DNS (if used) and get the real IP of the target
-	hostip, err := net.ResolveIPAddr("ip4", addr.name)
+	conn, err := net.Dial("ip:ipv6-icmp", netaddr.String())
 
 	if err != nil {
-			panic(err)
-			return 0, 0, err
+		return 0, 0, fmt.Errorf("set HopLimit %d: %s", ttl, err)
 	}
 
-	// create ICMP message
-	m := icmp.Message{
-			Type: ipv4.ICMPTypeEcho, Code: 0,
-			Body: &icmp.Echo{
-					ID: os.Getpid() & 0xffff, Seq: 1, //<< uint(seq), // TODO
-					Data: []byte("echo requests"),
-			},
+	if ttl == 0 {
+		ttl = 60
 	}
-	b, err := m.Marshal(nil)
-	if err != nil {
-			return 0, 0, err
+
+	defer conn.Close()
+
+	opts := ipv6.NewConn(conn)
+	if err := opts.SetHopLimit(ttl); err != nil {
+		return 0, 0, fmt.Errorf("set HopLimit %d: %s", ttl, err)
 	}
+
+	return ping(conn, payload)
+}
+
+func ping(conn net.Conn, data []byte) (int, time.Duration, error) {
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
 
 	// Send it
 	start := time.Now()
 
-	n, err := c.WriteTo(b, hostip)
-	if err != nil {
-			return 0, 0, err
-	}
-
-	//calculate Packet loss
-	ploss := float32(len(b)) - float32(n)
-
-	// Wait for a reply
-	reply := make([]byte, 1500)
-
-	err = c.SetReadDeadline(time.Now().Add(10 * time.Second))
-
-	if err != nil {
-			return ploss, 0, err
-	}
-	n, peer, err := c.ReadFrom(reply)
-	if err != nil {
-			return ploss, 0, err
-	}
-	duration := time.Since(start)
-
-	// done here
-	rm, err := icmp.ParseMessage(ProtocolICMP, reply[:n])
-	if err != nil {
-			return ploss, 0, err
-	}
-	switch rm.Type {
-	case ipv4.ICMPTypeEchoReply:
-			return ploss, duration, nil
-	default:
-			return ploss, 0, fmt.Errorf("got %+v from %v; want echo reply", rm, peer)
-	}
-}
-
-func PingIp6(addr Address)(float32, time.Duration, error){
-
-	c, err := icmp.ListenPacket("udp6", ListenAddr)
-
+	wd, err := conn.Write(data);
 	if err != nil {
 		return 0, 0, err
 	}
-	defer c.Close()
-
-	// Resolve any DNS (if used) and get the real IP of the target
-	hostip, err := net.ResolveIPAddr("ip", addr.name)
-
-
-
-	wm := icmp.Message{
-		Type: ipv6.ICMPTypeEchoRequest, Code: 0,
-		Body: &icmp.Echo{
-			ID: os.Getpid() & 0xffff, Seq: 1,
-			Data: []byte("echo requests"),
-		},
-	}
-
-	wb, err := wm.Marshal(nil)
-
-	if err != nil {
-		return 0, 0, err
-	}
-
-	// Send it
-	start := time.Now()
-
-	n, err := c.WriteTo(wb, hostip)
-
-	if err != nil {
-		return 0, 0, err
-	}
-
-	//calculate Packet loss
-	ploss := float32(len(wb)) - float32(n)
 
 	rb := make([]byte, 1500)
 
-	err = c.SetReadDeadline(time.Now().Add(10 * time.Second))
-	if err != nil {
-			return ploss, 0, err
-	}
-
-	n, peer, err := c.ReadFrom(rb)
+	rd, err := conn.Read(rb)
 	if err != nil {
 		return 0, 0, err
 	}
+	ploss := len(data) - (wd+rd)
 
 	duration := time.Since(start)
 
-	rm, err := icmp.ParseMessage(ProtocolIPv6ICMP, rb[:n])
+	return ploss, duration, nil
+}
 
-	if err != nil {
-		return 0, 0, err
+func createICMP(t icmp.Type) ([]byte, error) {
+	m := icmp.Message{
+	  Type: t,
+	  Code: 0,
+	  Body: &icmp.Echo{
+	     ID: os.Getpid() & 0xffff, Seq: 1, //<< uint(seq), // TODO
+	     Data: []byte("echo requests"),
+	  },
 	}
-
-	switch rm.Type {
-		case ipv6.ICMPTypeEchoReply:
-			return ploss, duration, nil
-		default:
-			return ploss, 0, fmt.Errorf("got %+v from %v; want echo reply", rm, peer)
-	}
+	return m.Marshal(nil)
 }

@@ -9,7 +9,11 @@ import (
 	"time"
 	"log"
 	"os"
+	"syscall"
 )
+
+var PacketsRecv int
+var PacketsSent int
 
 func main() {
 
@@ -17,18 +21,18 @@ func main() {
 	addr := "google.com"
 	ttl := 52
 	for {
-		ploss, dur, err := PingIpv6(addr, ttl, payloadV4)
+		ploss, dur, err := PingIpv4(addr, ttl, payloadV4)
 		if err != nil {
-			log.Printf("host: %s, Loss: %d, error: %s\n", addr, ploss, err)
+			log.Printf("host: %s, Loss: %f, error: %s\n", addr, ploss, err)
 			return
 		}
-		log.Printf("host: %s, Loss: %d, RTT: %s\n", addr, ploss, dur)
+		log.Printf("host: %s, Loss: %f, RTT: %s\n", addr, ploss, dur)
 		time.Sleep(1 * time.Second)
 	}
 }
 
 
-func PingIpv4(address string, ttl int, payload []byte)(int, time.Duration, error){
+func PingIpv4(address string, ttl int, payload []byte)(float64, time.Duration, error){
 	netaddr, err := net.ResolveIPAddr("ip4", address)
 
 	conn, err := net.Dial("ip4:icmp", netaddr.String())
@@ -51,7 +55,7 @@ func PingIpv4(address string, ttl int, payload []byte)(int, time.Duration, error
 	return ping(conn, payload)
 }
 
-func PingIpv6(address string, ttl int, payload []byte) (int, time.Duration, error){
+func PingIpv6(address string, ttl int, payload []byte) (float64, time.Duration, error){
 	netaddr, err := net.ResolveIPAddr("ip", address)
 
 	conn, err := net.Dial("ip:ipv6-icmp", netaddr.String())
@@ -74,25 +78,32 @@ func PingIpv6(address string, ttl int, payload []byte) (int, time.Duration, erro
 	return ping(conn, payload)
 }
 
-func ping(conn net.Conn, data []byte) (int, time.Duration, error) {
+func ping(conn net.Conn, data []byte) (float64, time.Duration, error) {
 
 	conn.SetDeadline(time.Now().Add(10 * time.Second))
 
 	// Send it
 	start := time.Now()
-
-	wd, err := conn.Write(data);
-	if err != nil {
-		return 0, 0, err
+	for {
+		if _, err := conn.Write(data); err != nil {
+			if neterr, ok := err.(*net.OpError); ok {
+				if neterr.Err == syscall.ENOBUFS {
+					continue
+				}
+			}
+		}
+		PacketsSent++
+		break
 	}
 
 	rb := make([]byte, 1500)
 
-	rd, err := conn.Read(rb)
+	_, err := conn.Read(rb)
 	if err != nil {
 		return 0, 0, err
 	}
-	ploss := len(data) - (wd+rd)
+
+	ploss := float64(PacketsSent-PacketsRecv) / float64(PacketsSent) * 100
 
 	duration := time.Since(start)
 
@@ -108,5 +119,6 @@ func createICMP(t icmp.Type) ([]byte, error) {
 	     Data: []byte("echo requests"),
 	  },
 	}
+	PacketsRecv++
 	return m.Marshal(nil)
 }

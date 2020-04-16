@@ -54,15 +54,16 @@ func (addr Address) Pinger(ipv string) (float64, time.Duration, error) {
 
 func PingIPv4(address Address, ttl int, payload []byte)(float64, time.Duration, error){
 	netaddr, err := net.ResolveIPAddr("ip4", string(address))
-
+	if err != nil {
+		return 0, 0, err
+	}
 	conn, err := net.Dial("ip4:icmp", netaddr.String())
+	if err != nil {
+		return 0, 0, err
+	}
 
 	if ttl == 0 {
 		ttl = 60
-	}
-
-	if err != nil {
-		return 0, 0, err
 	}
 	defer conn.Close()
 
@@ -77,7 +78,9 @@ func PingIPv4(address Address, ttl int, payload []byte)(float64, time.Duration, 
 
 func PingIPv6(address Address, ttl int, payload []byte) (float64, time.Duration, error){
 	netaddr, err := net.ResolveIPAddr("ip6", string(address))
-
+	if err != nil {
+		return 0, 0, err
+	}
 	conn, err := net.Dial("ip:ipv6-icmp", netaddr.String())
 
 	if err != nil {

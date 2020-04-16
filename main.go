@@ -11,22 +11,25 @@ import (
 	"os"
 	"syscall"
 	"bufio"
+	"errors"
 )
 const ttl = 52
 
 var PacketsRecv int
 var PacketsSent int
 
+type Address string
+
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Print("Please enter an ip or an address: ")
 	scanner.Scan()
-	addr := scanner.Text()
+	netaddr := scanner.Text()
 
-	payloadV4, _ := createICMP(ipv4.ICMPTypeEcho)
+	addr := Address(netaddr)
 
 	for {
-		ploss, dur, err := PingIpv4(addr, ttl, payloadV4)
+		ploss, dur, err := addr.Pinger("ipv4")
 		if err != nil {
 			log.Printf("host: %s, Loss: %f, error: %s\n", addr, ploss, err)
 			return
@@ -36,9 +39,21 @@ func main() {
 	}
 }
 
+func (addr Address) Pinger(ipv string) (float64, time.Duration, error) {
+	switch ipv{
+		case "ipv4":
+			payloadV4, _ := createICMP(ipv4.ICMPTypeEcho)
+			return PingIpv4(addr, ttl, payloadV4)
+		case "ipv6":
+			payloadV6, _ := createICMP(ipv6.ICMPTypeEchoRequest)
+			return PingIpv6(addr, ttl, payloadV6)
+		default:
+			return 0, 0, errors.New("No ip version specified")
+	}
+}
 
-func PingIpv4(address string, ttl int, payload []byte)(float64, time.Duration, error){
-	netaddr, err := net.ResolveIPAddr("ip4", address)
+func PingIpv4(address Address, ttl int, payload []byte)(float64, time.Duration, error){
+	netaddr, err := net.ResolveIPAddr("ip4", string(address))
 
 	conn, err := net.Dial("ip4:icmp", netaddr.String())
 
@@ -60,8 +75,8 @@ func PingIpv4(address string, ttl int, payload []byte)(float64, time.Duration, e
 	return ping(conn, payload)
 }
 
-func PingIpv6(address string, ttl int, payload []byte) (float64, time.Duration, error){
-	netaddr, err := net.ResolveIPAddr("ip", address)
+func PingIpv6(address Address, ttl int, payload []byte) (float64, time.Duration, error){
+	netaddr, err := net.ResolveIPAddr("ip", string(address))
 
 	conn, err := net.Dial("ip:ipv6-icmp", netaddr.String())
 

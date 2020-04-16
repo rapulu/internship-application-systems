@@ -10,16 +10,21 @@ import (
 	"log"
 	"os"
 	"syscall"
+	"bufio"
 )
+const ttl = 52
 
 var PacketsRecv int
 var PacketsSent int
 
 func main() {
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Print("Please enter an ip or an address: ")
+	scanner.Scan()
+	addr := scanner.Text()
 
 	payloadV4, _ := createICMP(ipv4.ICMPTypeEcho)
-	addr := "google.com"
-	ttl := 52
+
 	for {
 		ploss, dur, err := PingIpv4(addr, ttl, payloadV4)
 		if err != nil {

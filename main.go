@@ -43,16 +43,16 @@ func (addr Address) Pinger(ipv string) (float64, time.Duration, error) {
 	switch ipv{
 		case "ipv4":
 			payloadV4, _ := createICMP(ipv4.ICMPTypeEcho)
-			return PingIpv4(addr, ttl, payloadV4)
+			return PingIPv4(addr, ttl, payloadV4)
 		case "ipv6":
 			payloadV6, _ := createICMP(ipv6.ICMPTypeEchoRequest)
-			return PingIpv6(addr, ttl, payloadV6)
+			return PingIPv6(addr, ttl, payloadV6)
 		default:
 			return 0, 0, errors.New("No ip version specified")
 	}
 }
 
-func PingIpv4(address Address, ttl int, payload []byte)(float64, time.Duration, error){
+func PingIPv4(address Address, ttl int, payload []byte)(float64, time.Duration, error){
 	netaddr, err := net.ResolveIPAddr("ip4", string(address))
 
 	conn, err := net.Dial("ip4:icmp", netaddr.String())
@@ -75,8 +75,8 @@ func PingIpv4(address Address, ttl int, payload []byte)(float64, time.Duration, 
 	return ping(conn, payload)
 }
 
-func PingIpv6(address Address, ttl int, payload []byte) (float64, time.Duration, error){
-	netaddr, err := net.ResolveIPAddr("ip", string(address))
+func PingIPv6(address Address, ttl int, payload []byte) (float64, time.Duration, error){
+	netaddr, err := net.ResolveIPAddr("ip6", string(address))
 
 	conn, err := net.Dial("ip:ipv6-icmp", netaddr.String())
 
